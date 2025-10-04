@@ -726,8 +726,11 @@ class ConnectionHandler:
         self.client_abort = False
         emotion_flag = True
         for response in llm_responses:
-            if self.client_abort:
+            # 检查是否收到停止请求
+            if self.client_abort or (hasattr(self, 'tts') and self.tts and self.tts.tts_stop_request):
+                self.logger.bind(tag=TAG).info("收到停止请求，中断LLM回复生成")
                 break
+                
             if self.intent_type == "function_call" and functions is not None:
                 content, tools_call = response
                 if "content" in response:
@@ -1033,6 +1036,33 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).debug(
                 f"清理结束: TTS队列大小={self.tts.tts_text_queue.qsize()}, 音频队列大小={self.tts.tts_audio_queue.qsize()}"
             )
+
+    def stop_answering(self):
+        """停止回答的方法"""
+        try:
+            self.logger.bind(tag=TAG).info("收到停止回答请求")
+            
+            # 设置停止标志
+            self.client_abort = True
+            
+            # 停止TTS输出
+            if hasattr(self, 'tts') and self.tts:
+                self.tts.tts_stop_request = True
+                # 清空TTS队列
+                if hasattr(self.tts, 'tts_text_queue'):
+                    self.tts.tts_text_queue.queue.clear()
+                if hasattr(self.tts, 'tts_audio_queue'):
+                    self.tts.tts_audio_queue.queue.clear()
+                self.logger.bind(tag=TAG).info("已清空TTS队列")
+            
+            # 重置LLM任务状态
+            self.llm_finish_task = True
+            
+            self.logger.bind(tag=TAG).info("停止回答操作完成")
+            return True
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"停止回答时出错: {e}")
+            return False
 
     def reset_vad_states(self):
         self.client_audio_buffer = bytearray()

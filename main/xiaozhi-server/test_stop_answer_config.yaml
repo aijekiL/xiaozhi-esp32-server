@@ -1,0 +1,61 @@
+# 停止回答功能测试配置
+# 用于测试"停止回答"等命令是否能正确打断智能音箱的回复
+
+# 基本配置
+server:
+  ip: "0.0.0.0"
+  port: 8000
+  http_port: 8003
+
+# 退出命令配置 - 确保包含停止回答命令
+exit_commands:
+  - "退出"
+  - "关闭"
+  - "停止回答"
+  - "别说了"
+  - "闭嘴"
+  - "停止"
+  - "停"
+  - "够了"
+
+# 唤醒词配置
+wakeup_words:
+  - "你好小智"
+  - "嘿你好呀"
+  - "小爱同学"
+
+# 角色配置
+xiaozhi:
+  type: hello
+  version: 1
+  transport: websocket
+  audio_params:
+    format: opus
+    sample_rate: 16000
+    channels: 1
+    frame_duration: 60
+
+# 模块配置 - 简化配置，专注于核心功能
+selected_module:
+  VAD: "VAD_silero"
+  ASR: "ASR_aliyun"
+  TTS: "TTS_aliyun"
+  LLM: "LLM_openai"
+  Memory: "Memory_nomem"
+  Intent: "Intent_nointent"  # 禁用意图识别，直接处理停止命令
+
+# 禁用意图识别，让停止命令直接进入check_direct_exit
+Intent:
+  Intent_nointent:
+    type: "nointent"
+
+# 日志级别配置 - 启用详细日志
+logging:
+  level: "DEBUG"
+  format: "detailed"
+
+# 测试专用提示词
+prompt: |
+  你是一个测试助手，专门用于测试停止回答功能。
+  请用简短的话回答问题，这样更容易测试打断功能。
+  当用户说"停止回答"时，你应该立即停止说话。

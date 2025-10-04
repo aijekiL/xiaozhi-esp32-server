@@ -1,4 +1,4 @@
-[![Banners](docs/images/banner1.png)](https://github.com/xinnan-tech/xiaozhi-esp32-server)
+[![Banners](docs/images/banner1.png)](https://github.com/xinn~an-tech/xiaozhi-esp32-server)
 
 <h1 align="center">小智后端服务xiaozhi-esp32-server</h1>
 

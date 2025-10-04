@@ -112,151 +112,163 @@ class IntentProvider(IntentProviderBase):
         return llm_result
 
     async def detect_intent(self, conn, dialogue_history: List[Dict], text: str) -> str:
-        if not self.llm:
-            raise ValueError("LLM provider not set")
-        if conn.func_handler is None:
-            return '{"function_call": {"name": "continue_chat"}}'
-
-        # 记录整体开始时间
-        total_start_time = time.time()
-
-        # 打印使用的模型信息
-        model_info = getattr(self.llm, "model_name", str(self.llm.__class__.__name__))
-        logger.bind(tag=TAG).debug(f"使用意图识别模型: {model_info}")
-
-        # 计算缓存键
-        cache_key = hashlib.md5((conn.device_id + text).encode()).hexdigest()
-
-        # 检查缓存
-        cached_intent = self.cache_manager.get(self.CacheType.INTENT, cache_key)
-        if cached_intent is not None:
-            cache_time = time.time() - total_start_time
-            logger.bind(tag=TAG).debug(
-                f"使用缓存的意图: {cache_key} -> {cached_intent}, 耗时: {cache_time:.4f}秒"
-            )
-            return cached_intent
-
-        if self.promot == "":
-            functions = conn.func_handler.get_functions()
-            if hasattr(conn, "mcp_client"):
-                mcp_tools = conn.mcp_client.get_available_tools()
-                if mcp_tools is not None and len(mcp_tools) > 0:
-                    if functions is None:
-                        functions = []
-                    functions.extend(mcp_tools)
-
-            self.promot = self.get_intent_system_prompt(functions)
-
-        music_config = initialize_music_handler(conn)
-        music_file_names = music_config["music_file_names"]
-        prompt_music = f"{self.promot}\n<musicNames>{music_file_names}\n</musicNames>"
-
-        home_assistant_cfg = conn.config["plugins"].get("home_assistant")
-        if home_assistant_cfg:
-            devices = home_assistant_cfg.get("devices", [])
-        else:
-            devices = []
-        if len(devices) > 0:
-            hass_prompt = "\n下面是我家智能设备列表（位置，设备名，entity_id），可以通过homeassistant控制\n"
-            for device in devices:
-                hass_prompt += device + "\n"
-            prompt_music += hass_prompt
-
-        logger.bind(tag=TAG).debug(f"User prompt: {prompt_music}")
-
-        # 构建用户对话历史的提示
-        msgStr = ""
-
-        # 获取最近的对话历史
-        start_idx = max(0, len(dialogue_history) - self.history_count)
-        for i in range(start_idx, len(dialogue_history)):
-            msgStr += f"{dialogue_history[i].role}: {dialogue_history[i].content}\n"
-
-        msgStr += f"User: {text}\n"
-        user_prompt = f"current dialogue:\n{msgStr}"
-
-        # 记录预处理完成时间
-        preprocess_time = time.time() - total_start_time
-        logger.bind(tag=TAG).debug(f"意图识别预处理耗时: {preprocess_time:.4f}秒")
-
-        # 使用LLM进行意图识别
-        llm_start_time = time.time()
-        logger.bind(tag=TAG).debug(f"开始LLM意图识别调用, 模型: {model_info}")
-
-        intent = self.llm.response_no_stream(
-            system_prompt=prompt_music, user_prompt=user_prompt
-        )
-
-        # 记录LLM调用完成时间
-        llm_time = time.time() - llm_start_time
-        logger.bind(tag=TAG).debug(
-            f"LLM意图识别完成, 模型: {model_info}, 调用耗时: {llm_time:.4f}秒"
-        )
-
-        # 记录后处理开始时间
-        postprocess_start_time = time.time()
-
-        # 清理和解析响应
-        intent = intent.strip()
-        # 尝试提取JSON部分
-        match = re.search(r"\{.*\}", intent, re.DOTALL)
-        if match:
-            intent = match.group(0)
-
-        # 记录总处理时间
-        total_time = time.time() - total_start_time
-        logger.bind(tag=TAG).debug(
-            f"【意图识别性能】模型: {model_info}, 总耗时: {total_time:.4f}秒, LLM调用: {llm_time:.4f}秒, 查询: '{text[:20]}...'"
-        )
-
-        # 尝试解析为JSON
+        """检测用户意图"""
         try:
-            intent_data = json.loads(intent)
-            # 如果包含function_call，则格式化为适合处理的格式
-            if "function_call" in intent_data:
-                function_data = intent_data["function_call"]
-                function_name = function_data.get("name")
-                function_args = function_data.get("arguments", {})
+            # 首先检查是否是停止回答命令
+            from core.handle.stopAnswerHandle import is_stop_answer_command
+            if is_stop_answer_command(text):
+                # 返回特殊标记，表示这是停止回答命令
+                return "STOP_ANSWER_COMMAND"
+            
+            # 原有的意图识别逻辑
+            if not self.llm:
+                raise ValueError("LLM provider not set")
+            if conn.func_handler is None:
+                return '{"function_call": {"name": "continue_chat"}}'
 
-                # 记录识别到的function call
-                logger.bind(tag=TAG).info(
-                    f"llm 识别到意图: {function_name}, 参数: {function_args}"
+            # 记录整体开始时间
+            total_start_time = time.time()
+
+            # 打印使用的模型信息
+            model_info = getattr(self.llm, "model_name", str(self.llm.__class__.__name__))
+            logger.bind(tag=TAG).debug(f"使用意图识别模型: {model_info}")
+
+            # 计算缓存键
+            cache_key = hashlib.md5((conn.device_id + text).encode()).hexdigest()
+
+            # 检查缓存
+            cached_intent = self.cache_manager.get(self.CacheType.INTENT, cache_key)
+            if cached_intent is not None:
+                cache_time = time.time() - total_start_time
+                logger.bind(tag=TAG).debug(
+                    f"使用缓存的意图: {cache_key} -> {cached_intent}, 耗时: {cache_time:.4f}秒"
                 )
+                return cached_intent
 
-                # 如果是继续聊天，清理工具调用相关的历史消息
-                if function_name == "continue_chat":
-                    # 保留非工具相关的消息
-                    clean_history = [
-                        msg
-                        for msg in conn.dialogue.dialogue
-                        if msg.role not in ["tool", "function"]
-                    ]
-                    conn.dialogue.dialogue = clean_history
+            if self.promot == "":
+                functions = conn.func_handler.get_functions()
+                if hasattr(conn, "mcp_client"):
+                    mcp_tools = conn.mcp_client.get_available_tools()
+                    if mcp_tools is not None and len(mcp_tools) > 0:
+                        if functions is None:
+                            functions = []
+                        functions.extend(mcp_tools)
 
-                # 添加到缓存
-                self.cache_manager.set(self.CacheType.INTENT, cache_key, intent)
+                self.promot = self.get_intent_system_prompt(functions)
 
-                # 后处理时间
-                postprocess_time = time.time() - postprocess_start_time
-                logger.bind(tag=TAG).debug(f"意图后处理耗时: {postprocess_time:.4f}秒")
+            music_config = initialize_music_handler(conn)
+            music_file_names = music_config["music_file_names"]
+            prompt_music = f"{self.promot}\n<musicNames>{music_file_names}\n</musicNames>"
 
-                # 确保返回完全序列化的JSON字符串
-                return intent
+            home_assistant_cfg = conn.config["plugins"].get("home_assistant")
+            if home_assistant_cfg:
+                devices = home_assistant_cfg.get("devices", [])
             else:
-                # 添加到缓存
-                self.cache_manager.set(self.CacheType.INTENT, cache_key, intent)
+                devices = []
+            if len(devices) > 0:
+                hass_prompt = "\n下面是我家智能设备列表（位置，设备名，entity_id），可以通过homeassistant控制\n"
+                for device in devices:
+                    hass_prompt += device + "\n"
+                prompt_music += hass_prompt
 
+            logger.bind(tag=TAG).debug(f"User prompt: {prompt_music}")
+
+            # 构建用户对话历史的提示
+            msgStr = ""
+
+            # 获取最近的对话历史
+            start_idx = max(0, len(dialogue_history) - self.history_count)
+            for i in range(start_idx, len(dialogue_history)):
+                msgStr += f"{dialogue_history[i].role}: {dialogue_history[i].content}\n"
+
+            msgStr += f"User: {text}\n"
+            user_prompt = f"current dialogue:\n{msgStr}"
+
+            # 记录预处理完成时间
+            preprocess_time = time.time() - total_start_time
+            logger.bind(tag=TAG).debug(f"意图识别预处理耗时: {preprocess_time:.4f}秒")
+
+            # 使用LLM进行意图识别
+            llm_start_time = time.time()
+            logger.bind(tag=TAG).debug(f"开始LLM意图识别调用, 模型: {model_info}")
+
+            intent = self.llm.response_no_stream(
+                system_prompt=prompt_music, user_prompt=user_prompt
+            )
+
+            # 记录LLM调用完成时间
+            llm_time = time.time() - llm_start_time
+            logger.bind(tag=TAG).debug(
+                f"LLM意图识别完成, 模型: {model_info}, 调用耗时: {llm_time:.4f}秒"
+            )
+
+            # 记录后处理开始时间
+            postprocess_start_time = time.time()
+
+            # 清理和解析响应
+            intent = intent.strip()
+            # 尝试提取JSON部分
+            match = re.search(r"\{.*\}", intent, re.DOTALL)
+            if match:
+                intent = match.group(0)
+
+            # 记录总处理时间
+            total_time = time.time() - total_start_time
+            logger.bind(tag=TAG).debug(
+                f"【意图识别性能】模型: {model_info}, 总耗时: {total_time:.4f}秒, LLM调用: {llm_time:.4f}秒, 查询: '{text[:20]}...'"
+            )
+
+            # 尝试解析为JSON
+            try:
+                intent_data = json.loads(intent)
+                # 如果包含function_call，则格式化为适合处理的格式
+                if "function_call" in intent_data:
+                    function_data = intent_data["function_call"]
+                    function_name = function_data.get("name")
+                    function_args = function_data.get("arguments", {})
+
+                    # 记录识别到的function call
+                    logger.bind(tag=TAG).info(
+                        f"llm 识别到意图: {function_name}, 参数: {function_args}"
+                    )
+
+                    # 如果是继续聊天，清理工具调用相关的历史消息
+                    if function_name == "continue_chat":
+                        # 保留非工具相关的消息
+                        clean_history = [
+                            msg
+                            for msg in conn.dialogue.dialogue
+                            if msg.role not in ["tool", "function"]
+                        ]
+                        conn.dialogue.dialogue = clean_history
+
+                    # 添加到缓存
+                    self.cache_manager.set(self.CacheType.INTENT, cache_key, intent)
+
+                    # 后处理时间
+                    postprocess_time = time.time() - postprocess_start_time
+                    logger.bind(tag=TAG).debug(f"意图后处理耗时: {postprocess_time:.4f}秒")
+
+                    # 确保返回完全序列化的JSON字符串
+                    return intent
+                else:
+                    # 添加到缓存
+                    self.cache_manager.set(self.CacheType.INTENT, cache_key, intent)
+
+                    # 后处理时间
+                    postprocess_time = time.time() - postprocess_start_time
+                    logger.bind(tag=TAG).debug(f"意图后处理耗时: {postprocess_time:.4f}秒")
+
+                    # 返回普通意图
+                    return intent
+            except json.JSONDecodeError:
                 # 后处理时间
                 postprocess_time = time.time() - postprocess_start_time
-                logger.bind(tag=TAG).debug(f"意图后处理耗时: {postprocess_time:.4f}秒")
-
-                # 返回普通意图
-                return intent
-        except json.JSONDecodeError:
-            # 后处理时间
-            postprocess_time = time.time() - postprocess_start_time
-            logger.bind(tag=TAG).error(
-                f"无法解析意图JSON: {intent}, 后处理耗时: {postprocess_time:.4f}秒"
-            )
-            # 如果解析失败，默认返回继续聊天意图
+                logger.bind(tag=TAG).error(
+                    f"无法解析意图JSON: {intent}, 后处理耗时: {postprocess_time:.4f}秒"
+                )
+                # 如果解析失败，默认返回继续聊天意图
+                return '{"intent": "继续聊天"}'
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"意图识别过程中发生错误: {e}")
             return '{"intent": "继续聊天"}'

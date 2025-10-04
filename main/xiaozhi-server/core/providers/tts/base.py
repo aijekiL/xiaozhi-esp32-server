@@ -22,6 +22,7 @@ from core.providers.tts.dto.dto import (
 )
 
 import traceback
+import time
 
 TAG = __name__
 logger = setup_logging()
@@ -196,11 +197,19 @@ class TTSProviderBase(ABC):
         while not self.conn.stop_event.is_set():
             try:
                 message = self.tts_text_queue.get(timeout=1)
-                if message.sentence_type == SentenceType.FIRST:
-                    self.conn.client_abort = False
+                
+                # 添加调试日志
+                logger.bind(tag=TAG).debug(f"TTS文本处理: 收到消息类型={getattr(message, 'sentence_type', 'N/A')}, 内容类型={getattr(message, 'content_type', 'N/A')}")
+                logger.bind(tag=TAG).debug(f"TTS状态检查: tts_stop_request={self.tts_stop_request}, client_abort={getattr(self.conn, 'client_abort', 'N/A')}")
+                
                 if self.conn.client_abort:
                     logger.bind(tag=TAG).info("收到打断信息，终止TTS文本处理线程")
+                    # 清空所有队列
+                    self.tts_text_queue.queue.clear()
+                    self.tts_audio_queue.queue.clear()
+                    logger.bind(tag=TAG).info("已清空TTS队列")
                     continue
+                    
                 if message.sentence_type == SentenceType.FIRST:
                     # 初始化参数
                     self.tts_stop_request = False
@@ -208,16 +217,26 @@ class TTSProviderBase(ABC):
                     self.tts_text_buff = []
                     self.is_first_sentence = True
                     self.tts_audio_first_sentence = True
+                    logger.bind(tag=TAG).debug("TTS会话开始，重置停止请求标志")
+                    
                 elif ContentType.TEXT == message.content_type:
+                    # 检查是否收到停止请求
+                    if self.tts_stop_request:
+                        logger.bind(tag=TAG).info("收到停止请求，跳过当前文本处理")
+                        logger.bind(tag=TAG).debug(f"跳过的文本内容: {getattr(message, 'content_detail', 'N/A')[:50]}...")
+                        continue
+                        
                     self.tts_text_buff.append(message.content_detail)
                     segment_text = self._get_segment_text()
                     if segment_text:
+                        logger.bind(tag=TAG).debug(f"处理文本片段: {segment_text[:50]}...")
                         if self.delete_audio_file:
                             audio_datas = self.to_tts(segment_text)
                             if audio_datas:
                                 self.tts_audio_queue.put(
                                     (message.sentence_type, audio_datas, segment_text)
                                 )
+                                logger.bind(tag=TAG).debug(f"已添加音频到队列: {len(audio_datas)} bytes")
                         else:
                             tts_file = self.to_tts(segment_text)
                             if tts_file:
@@ -225,6 +244,7 @@ class TTSProviderBase(ABC):
                                 self.tts_audio_queue.put(
                                     (message.sentence_type, audio_datas, segment_text)
                                 )
+                                logger.bind(tag=TAG).debug(f"已添加音频文件到队列: {tts_file}")
                 elif ContentType.FILE == message.content_type:
                     self._process_remaining_text()
                     tts_file = message.content_file
@@ -239,6 +259,7 @@ class TTSProviderBase(ABC):
                     self.tts_audio_queue.put(
                         (message.sentence_type, [], message.content_detail)
                     )
+                    logger.bind(tag=TAG).debug("TTS会话结束")
 
             except queue.Empty:
                 continue
@@ -252,6 +273,15 @@ class TTSProviderBase(ABC):
         while not self.conn.stop_event.is_set():
             text = None
             try:
+                # 检查是否收到停止请求
+                if self.tts_stop_request:
+                    logger.bind(tag=TAG).info("收到停止请求，暂停音频播放")
+                    # 清空音频队列
+                    self.tts_audio_queue.queue.clear()
+                    # 等待一小段时间后继续检查
+                    time.sleep(0.1)
+                    continue
+                    
                 try:
                     sentence_type, audio_datas, text = self.tts_audio_queue.get(
                         timeout=1
@@ -260,6 +290,12 @@ class TTSProviderBase(ABC):
                     if self.conn.stop_event.is_set():
                         break
                     continue
+                    
+                # 再次检查停止请求
+                if self.tts_stop_request:
+                    logger.bind(tag=TAG).info("播放前收到停止请求，跳过当前音频")
+                    continue
+                    
                 future = asyncio.run_coroutine_threadsafe(
                     sendAudioMessage(self.conn, sentence_type, audio_datas, text),
                     self.conn.loop,

@@ -3,6 +3,7 @@ import asyncio
 import uuid
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.helloHandle import checkWakeupWords
+from core.handle.stopAnswerHandle import handle_stop_answer, is_stop_answer_command
 from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import ContentType
 from core.utils.dialogue import Message
@@ -48,6 +49,23 @@ async def check_direct_exit(conn, text):
     """检查是否有明确的退出命令"""
     _, text = remove_punctuation_and_length(text)
     cmd_exit = conn.cmd_exit
+    
+    # 首先检查是否是停止回答命令
+    if is_stop_answer_command(text):
+        conn.logger.bind(tag=TAG).info(f"识别到停止回答命令: {text}")
+        await send_stt_message(conn, text)
+        
+        # 使用专门的停止回答处理器
+        success = await handle_stop_answer(conn, text)
+        if success:
+            # 发送停止确认消息
+            await send_stt_message(conn, "好的，我已经停止回答了")
+            return True
+        else:
+            conn.logger.bind(tag=TAG).error("停止回答处理失败")
+            return False
+    
+    # 检查其他退出命令
     for cmd in cmd_exit:
         if text == cmd:
             conn.logger.bind(tag=TAG).info(f"识别到明确的退出命令: {text}")
@@ -67,6 +85,19 @@ async def analyze_intent_with_llm(conn, text):
     dialogue = conn.dialogue
     try:
         intent_result = await conn.intent.detect_intent(conn, dialogue.dialogue, text)
+        
+        # 检查是否是停止回答命令
+        if intent_result == "STOP_ANSWER_COMMAND":
+            conn.logger.bind(tag=TAG).info("意图识别检测到停止回答命令")
+            # 直接调用停止回答处理器
+            success = await handle_stop_answer(conn, text)
+            if success:
+                # 返回特殊标记，表示已处理停止回答
+                return "STOP_ANSWER_PROCESSED"
+            else:
+                conn.logger.bind(tag=TAG).error("停止回答处理失败")
+                return None
+        
         return intent_result
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"意图识别失败: {str(e)}")
@@ -77,6 +108,11 @@ async def analyze_intent_with_llm(conn, text):
 async def process_intent_result(conn, intent_result, original_text):
     """处理意图识别结果"""
     try:
+        # 检查是否是已处理的停止回答命令
+        if intent_result == "STOP_ANSWER_PROCESSED":
+            conn.logger.bind(tag=TAG).info("停止回答命令已在意图识别阶段处理完成")
+            return True
+        
         # 尝试将结果解析为JSON
         intent_data = json.loads(intent_result)
 

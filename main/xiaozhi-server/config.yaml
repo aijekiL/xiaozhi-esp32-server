@@ -17,7 +17,7 @@ server:
   # 当你使用docker部署或使用公网部署(使用ssl、域名)时，不一定准确
   # 所以如果你使用docker部署时，将websocket设置成局域网地址
   # 如果你使用公网部署时，将vwebsocket设置成公网地址
-  websocket: ws://你的ip或者域名:端口号/xiaozhi/v1/
+  websocket: ws://172.20.21.111:8000/xiaozhi/v1/
   # 视觉分析接口地址
   # 向设备发送的视觉分析的接口地址
   # 如果按下面默认的写法，系统会自动生成视觉识别地址，并输出在启动日志里，这个地址你可以直接用浏览器访问确认一下
@@ -73,6 +73,10 @@ stop_tts_notify_voice: "config/assets/tts_notify.mp3"
 exit_commands:
   - "退出"
   - "关闭"
+  - "停止回答"
+  - "别说了"
+  - "闭嘴"
+  - "停止"
 
 xiaozhi:
   type: hello
@@ -419,9 +423,9 @@ LLM:
     # 定义LLM API类型
     type: AliBL
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    app_id: 你的app_id
+    app_id: fa985f51c30a43d5911a317df073e64e
     # 可在这里找到你的 api_key https://bailian.console.aliyun.com/?apiKey=1#/api-key
-    api_key: 你的api_key
+    api_key: sk-587d66a31cab4f3fa9fe59f2a7d8f7f6
     # 是否不使用本地prompt：true|false (默不用请在百练应用中设置prompt)
     is_no_prompt: true
     # Ali_memory_id：false（不使用）|你的memory_id（请在百练应用中设置中获取）
@@ -451,7 +455,7 @@ LLM:
     # 可在这里找到你的api key https://bigmodel.cn/usercenter/proj-mgmt/apikeys
     model_name: glm-4-flash
     url: https://open.bigmodel.cn/api/paas/v4/
-    api_key: 你的chat-glm web key
+    api_key: cd3d2c1f038d4d649f1b180572e4f6ca.oUN4w269YDGzeegB
   OllamaLLM:
     # 定义LLM API类型
     type: ollama
@@ -463,7 +467,7 @@ LLM:
     # 建议使用本地部署的dify接口，国内部分区域访问dify公有云接口可能会受限
     # 如果使用DifyLLM，配置文件里prompt(提示词)是无效的，需要在dify控制台设置提示词
     base_url: https://api.dify.ai/v1
-    api_key: 你的DifyLLM web key
+    api_key: app-aVjUVFs0v2bNhe0jNFVe1ESM
     # 使用的对话模式 可以选择工作流 workflows/run 对话模式 chat-messages  文本生成 completion-messages
     # 使用workflows进行返回的时候输入参数为 query 返回参数的名字要设置为 answer
     # 文本生成的默认输入参数也是query
